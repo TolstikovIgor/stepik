@@ -744,6 +744,7 @@ SELECT * FROM applicant_order;
 /*3.5 База данных "Учебная аналитика по курсу"*/
 ================================================
 
+
 /*Отобрать все шаги, в которых рассматриваются вложенные запросы (то есть в названии шага упоминаются вложенные запросы). 
 Указать к какому уроку и модулю они относятся. Для этого вывести 3 поля:
 -в поле Модуль указать номер модуля и его название через пробел;
@@ -753,7 +754,8 @@ SELECT * FROM applicant_order;
 Длину полей Модуль и Урок ограничить 19 символами, при этом слишком длинные надписи обозначить многоточием в конце (16 символов
  - это номер модуля или урока, пробел и  название Урока или Модуля к ним присоединить "..."). Информацию отсортировать по возрастанию 
  номеров модулей, порядковых номеров уроков и порядковых номеров шагов.*/
-SELECT CONCAT(module.module_id, ' ', LEFT(module_name, 14), '...') AS Модуль,
+SELECT
+    CONCAT(module.module_id, ' ', LEFT(module_name, 14), '...') AS Модуль,
     CONCAT(module.module_id, '.', lesson_position, ' ', LEFT(lesson_name, 12), '...') AS Урок,
     CONCAT(module.module_id, '.', lesson_position, '.', step_position, ' ', step_name) AS Шаг
 FROM step
@@ -761,6 +763,28 @@ FROM step
     INNER JOIN module ON module.module_id = lesson.module_id
 WHERE step_name LIKE '%Вложен%запрос%'
 ORDER BY Модуль, Урок, Шаг;
+
+===
+SET @limit = 19;
+WITH steps AS
+(
+    SELECT
+        module_id, lesson_id, lesson_position, step_id, step_position,
+        CONCAT(module_id, ' ' , module_name) AS Модуль,
+        CONCAT(module_id, '.', lesson_position, ' ' , lesson_name) AS Урок,
+        CONCAT(module_id, '.', lesson_position, '.', step_position, ' ' , step_name) AS Шаг
+    FROM
+        module
+        INNER JOIN lesson USING (module_id)
+        INNER JOIN step   USING (lesson_id)
+    WHERE LOWER(step_name) LIKE '%вложенн% запрос%'
+)
+SELECT
+    IF(LENGTH(Модуль) <= @limit, Модуль, CONCAT(LEFT(Модуль, @limit-3), '...')) AS Модуль,
+    IF(LENGTH(Урок)   <= @limit,   Урок, CONCAT(LEFT(  Урок, @limit-3), '...')) AS Урок,
+    Шаг
+FROM  steps
+ORDER BY module_id, lesson_position, step_position;
 +---------------------+---------------------+-------------------------------------------------------------+
 | Модуль              | Урок                | Шаг                                                         |
 +---------------------+---------------------+-------------------------------------------------------------+
@@ -783,6 +807,17 @@ INSERT INTO step_keyword (step_id, keyword_id)
     WHERE regexp_instr(step_name, concat('\\b', keyword_name, '\\b'));
 
 SELECT * FROM step_keyword;
+
+===
+INSERT INTO step_keyword(step_id, keyword_id)
+SELECT step_id, keyword_id
+FROM step INNER JOIN keyword
+     ON INSTR(CONCAT(step_name, ' '), 
+              CONCAT(' ', keyword_name, ' ')) OR
+        INSTR(CONCAT(step_name, ' '), 
+              CONCAT(' ', keyword_name, ',')) OR
+        INSTR(CONCAT(step_name, ' '), 
+              CONCAT(' ', keyword_name, '('));
 +---------+------------+
 | step_id | keyword_id |
 +---------+------------+
@@ -827,6 +862,22 @@ FROM module
     INNER JOIN keyword USING(keyword_id)
 WHERE keyword_name='MAX' OR 'AVG'
 ORDER BY 1;
+
+===
+SELECT 
+    concat(module_id,'.',lesson_position,
+           IF(step_position < 10, ".0","."),
+           step_position," ",step_name) AS Шаг
+FROM
+   step
+   JOIN lesson USING(lesson_id)
+   JOIN module USING(module_id)
+   JOIN step_keyword USING (step_id)
+   JOIN keyword USING(keyword_id)
+WHERE keyword_name = 'MAX' OR keyword_name ='AVG'
+GROUP BY ШАГ
+HAVING COUNT(*) = 2
+ORDER BY 1;
 +---------------------------------------------------------+
 | Шаг                                                     |
 +---------------------------------------------------------+
@@ -834,5 +885,370 @@ ORDER BY 1;
 | 1.4.06 Вложенный запрос после SELECT                    |
 +---------------------------------------------------------+
 
+/*Посчитать, сколько студентов относится к каждой группе. Столбцы назвать Группа, Интервал, Количество. Указать границы интервала.*/
+CREATE TABLE rate
+SELECT student_name, rate, 
+    CASE
+        WHEN rate <= 10 THEN "I"
+        WHEN rate <= 15 THEN "II"
+        WHEN rate <= 27 THEN "III"
+        ELSE "IV"
+    END AS Группа
+FROM      
+    (
+     SELECT student_name, count(*) as rate
+     FROM 
+         (
+          SELECT student_name, step_id
+          FROM 
+              student 
+              INNER JOIN step_student USING(student_id)
+          WHERE result = "correct"
+          GROUP BY student_name, step_id
+         ) query_in
+     GROUP BY student_name 
+    ) query_in_1;
 
+SELECT Группа, 
+ CASE
+        WHEN rate <= 10 THEN "от 0 до 10"
+        WHEN rate <= 15 THEN "от 11 до 15"
+        WHEN rate <= 27 THEN "от 16 до 27"
+        ELSE "больше 27"
+    END AS Интервал, COUNT(student_name) AS Количество
+FROM rate
+GROUP BY Группа, Интервал
+ORDER BY Группа;
 
+===
+CREATE TABLE completed_steps AS
+SELECT student_name, 
+       COUNT(step_id) AS Пройдено_Шагов,
+       CASE WHEN COUNT(step_id) <= 10 THEN "I"
+            WHEN COUNT(step_id) <= 15 THEN "II"
+            WHEN COUNT(step_id) <= 27 THEN "III"
+            ELSE "IV" 
+       END AS Группа
+FROM student INNER JOIN step_student USING(student_id)
+WHERE result = "correct"
+GROUP BY student_name
+ORDER BY 3, 2, 1;
+
+SELECT Группа,
+       CASE WHEN Группа = 'I' THEN "от 0 до 10"
+            WHEN Группа = 'II' THEN "от 11 до 15"
+            WHEN Группа = 'III' THEN "от 16 до 27"
+            ELSE "больше 27" 
+       END AS Интервал,
+       COUNT(student_name) AS Количество 
+FROM completed_steps
+GROUP BY Группа;
++--------+-------------+------------+
+| Группа | Интервал    | Количество |
++--------+-------------+------------+
+| I      | от 0 до 10  | 10         |
+| II     | от 11 до 15 | 27         |
+| III    | от 16 до 27 | 9          |
+| IV     | больше 27   | 18         |
++--------+-------------+------------+
+
+/*Исправить запрос примера так: для шагов, которые  не имеют неверных ответов,  указать 100 как процент успешных попыток,
+ если же шаг не имеет верных ответов, указать 0. Информацию отсортировать сначала по возрастанию успешности, а затем по 
+ названию шага в алфавитном порядке.*/
+WITH table1 (step_name, correct, count) AS (   
+SELECT 
+  step_name, 
+  SUM( IF (result = 'correct' , 1 , 0)) AS s, 
+  COUNT(result) AS c
+  FROM step 
+  JOIN step_student USING (step_id)
+  GROUP BY step_name
+    )
+
+SELECT  step_name AS Шаг, ROUND((correct/count)*100) AS Успешность
+FROM table1
+ORDER BY 2, 1
+
+===
+WITH tt1 AS (
+    SELECT 
+       step_name,
+       SUM(CASE result WHEN 'correct' THEN 1 ELSE 0 END) c_c,
+       SUM(CASE result WHEN 'wrong' THEN 1 ELSE 0 END) c_w
+    FROM step INNER JOIN step_student USING (step_id)
+    GROUP BY step_name
+)
+SELECT step_name Шаг,
+       IF(c_c = 0, 0, IF(c_w = 0, 100, ROUND((c_c / (c_c + c_w) * 100),0))) Успешность
+FROM tt1
+ORDER BY 2 ASC,1 ASC;
++--------------------------------------------------------------------------+------------+
+| Шаг                                                                      | Успешность |
++--------------------------------------------------------------------------+------------+
+| Задание. Работа с архивной таблицей, оператор UNION, часть 1             | 0          |
+| Выборка данных, оператор LIKE                                            | 19         |
+| Вложенные запросы в операторах соединения                                | 32         |
+| Задание. Вывести самый популярный жанр                                   | 33         |
+| Запросы для нескольких таблиц с группировкой                             | 33         |
+| Задание. Вывести заказы, доставленные с опозданием                       | 35         |
+| Задание. Вывести информацию о движении каждого заказа                    | 36         |
+| Запросы для нескольких таблиц со вложенными запросами                    | 36         |
+| Задание. Вывести подробную информацию о каждом заказе                    | 37         |
+| Выборка данных, вычисляемые столбцы, логические функции                  | 44         |
+| Операция соединение, использование USING()                               | 45         |
+| Перекрестное соединение CROSS JOIN                                       | 45         |
+| Задание. Вывести города, в которых живут клиенты магазина                | 48         |
+| Задание. Посчитать, сколько раз была заказана каждая книга               | 48         |
+| Запросы на основе трех и более связанных таблиц                          | 49         |
+| Выборка данных с сортировкой                                             | 53         |
+| Внешнее соединение LEFT и RIGHT OUTER JOIN                               | 55         |
+| Запросы на выборку из нескольких таблиц                                  | 58         |
+| Выборка данных, вычисляемые столбцы, математические функции              | 59         |
+| Задание. Вывести клиентов, которые заказывали книги определенного автора | 63         |
+| Задание. Вывести информацию об оплате каждого заказа                     | 65         |
+| Выборка данных, логические операции                                      | 67         |
+| Проектирование концептуальной модели базы данных                         | 70         |
+| Выборка данных, операторы BETWEEN, IN                                    | 72         |
+| Выборка данных с созданием вычисляемого столбца                          | 74         |
+| Выборка отдельных столбцов                                               | 76         |
+| Соединение INNER JOIN                                                    | 78         |
+| Выборка данных по условию                                                | 81         |
+| Выборка отдельных столбцов и присвоение им новых имен                    | 84         |
+| Выборка всех данных из таблицы                                           | 87         |
+| Задание. Работа с архивной таблицей, оператор UNION, часть 2             | 100        |
+| Построение логической схемы базы данных                                  | 100        |
++--------------------------------------------------------------------------+------------+
+
+/*Вычислить прогресс пользователей по курсу. Прогресс вычисляется как отношение верно пройденных шагов к общему количеству 
+шагов в процентах, округленное до целого. В нашей базе данные о решениях занесены не для всех шагов, поэтому общее количество
+ шагов определить как количество различных шагов в таблице step_student.
+
+Тем пользователям, которые прошли все шаги (прогресс = 100%) выдать "Сертификат с отличием". Тем, у кого прогресс больше или 
+равен 80% - "Сертификат". Для остальных записей в столбце Результат задать пустую строку ("").
+
+Информацию отсортировать по убыванию прогресса, затем по имени пользователя в алфавитном порядке.*/
+SET @max = (SELECT COUNT(DISTINCT step_id) FROM step_student);
+
+WITH table_result(student_name, result_student)
+   AS (
+    SELECT student_name, ROUND(COUNT(DISTINCT step_id) / @max * 100)
+    FROM student JOIN step_student USING(student_id)
+    WHERE result = "correct"
+    GROUP BY student_name
+    ORDER BY 2 DESC
+    )
+SELECT student_name AS Студент, result_student AS Прогресс,
+    CASE
+        WHEN result_student = 100 THEN 'Сертификат с отличием'
+        WHEN result_student >= 80 THEN 'Сертификат'
+        ELSE ''
+    END AS Результат
+FROM table_result
+ORDER BY Прогресс DESC, Студент;
+
+===
+
+WITH all_step (step_vse)
+AS (SELECT COUNT(DISTINCT step_id) FROM step_student),
+cor_step (step_vern, name_stud)
+AS (SELECT COUNT(DISTINCT step_id), student_name
+FROM (SELECT step_id, student_name
+    FROM student JOIN step_student USING (student_id)
+    where result = "correct")query_in 
+    GROUP BY student_name)
+SELECT name_stud AS Студент, ROUND(step_vern / step_vse * 100) AS Прогресс,
+CASE
+        WHEN ROUND(step_vern / step_vse * 100) = 100 THEN "Сертификат с отличием"
+        WHEN ROUND(step_vern / step_vse * 100) >= 80 THEN "Сертификат"
+        ELSE ""
+    END AS Результат
+FROM all_step CROSS JOIN cor_step
+ORDER BY 2 DESC, 1;
++------------+----------+-----------------------+
+| Студент    | Прогресс | Результат             |
++------------+----------+-----------------------+
+| student_60 | 100      | Сертификат с отличием |
+| student_15 | 94       | Сертификат            |
+| student_18 | 94       | Сертификат            |
+| student_27 | 94       | Сертификат            |
+| student_30 | 94       | Сертификат            |
+| student_31 | 94       | Сертификат            |
+| student_36 | 94       | Сертификат            |
+| student_39 | 94       | Сертификат            |
+| student_4  | 94       | Сертификат            |
+| student_43 | 94       | Сертификат            |
+| student_44 | 94       | Сертификат            |
+| student_46 | 94       | Сертификат            |
+| student_49 | 94       | Сертификат            |
+| student_51 | 94       | Сертификат            |
+| student_53 | 94       | Сертификат            |
+| student_59 | 91       | Сертификат            |
+| student_9  | 91       | Сертификат            |
+| student_23 | 88       | Сертификат            |
+| student_50 | 84       | Сертификат            |
+| student_20 | 78       |                       |
+| student_24 | 78       |                       |
+| student_52 | 63       |                       |
+| student_56 | 63       |                       |
+| student_34 | 59       |                       |
+| student_40 | 59       |                       |
+| student_11 | 50       |                       |
+| student_48 | 50       |                       |
+| student_42 | 47       |                       |
+| student_61 | 44       |                       |
+| student_13 | 41       |                       |
+| student_26 | 41       |                       |
+| student_1  | 34       |                       |
+| student_10 | 34       |                       |
+| student_12 | 34       |                       |
+| student_14 | 34       |                       |
+| student_19 | 34       |                       |
+| student_2  | 34       |                       |
+| student_21 | 34       |                       |
+| student_22 | 34       |                       |
+| student_25 | 34       |                       |
+| student_28 | 34       |                       |
+| student_3  | 34       |                       |
+| student_32 | 34       |                       |
+| student_35 | 34       |                       |
+| student_37 | 34       |                       |
+| student_41 | 34       |                       |
+| student_45 | 34       |                       |
+| student_54 | 34       |                       |
+| student_55 | 34       |                       |
+| student_57 | 34       |                       |
+| student_6  | 34       |                       |
+| student_62 | 34       |                       |
+| student_7  | 34       |                       |
+| student_8  | 34       |                       |
+| student_17 | 31       |                       |
+| student_33 | 31       |                       |
+| student_38 | 31       |                       |
+| student_58 | 31       |                       |
+| student_64 | 31       |                       |
+| student_16 | 28       |                       |
+| student_5  | 28       |                       |
+| student_63 | 28       |                       |
+| student_29 | 25       |                       |
+| student_47 | 25       |                       |
++------------+----------+-----------------------+
+
+/*Для студента с именем student_61 вывести все его попытки: название шага, результат и дату отправки попытки (submission_time). 
+Информацию отсортировать по дате отправки попытки и указать, сколько минут прошло между отправкой соседних попыток. Название шага
+ ограничить 20 символами и добавить "...". Столбцы назвать Студент, Шаг, Результат, Дата_отправки, Разница*/
+SELECT student_name AS Студент,
+CONCAT(LEFT(step_name, 20), '...') AS Шаг,
+result AS Результат,
+FROM_UNIXTIME(submission_time) AS Дата_отправки,
+SEC_TO_TIME(submission_time - LAG(submission_time, 1, submission_time) OVER (ORDER BY submission_time)) AS Разница
+FROM step
+    INNER JOIN step_student USING (step_id)
+    INNER JOIN student USING(student_id)
+WHERE student_name = 'student_61'
+ORDER BY Дата_отправки
+
+===
+SELECT 
+    student_name AS 'Студент',
+    CONCAT(LEFT(step_name,20),'...') AS 'Шаг',
+    result AS 'Результат',
+    FROM_UNIXTIME(submission_time) AS 'Дата_отправки',
+    SEC_TO_TIME(submission_time - 
+                LAG(submission_time,1,submission_time) 
+                OVER (ORDER BY submission_time)) AS 'Разница'
+/* 
+LAG(submission_time,1,submission_time) 
+первый аргумент - LAG(submission_time) - предыдущая сабмишн
+второй аргумент - 1 - через сколько строк брать предыдущее значение
+третий аргумент - submission_time - Если вычисленное значение Null, то взять текущее значение сабмишн
+*/   
+FROM 
+    step_student
+    JOIN student USING(student_id)
+    JOIN step USING(step_id)
+WHERE student_name = 'student_61'
+ORDER BY 4
++------------+-------------------------+-----------+---------------------+------------------+
+| Студент    | Шаг                     | Результат | Дата_отправки       | Разница          |
++------------+-------------------------+-----------+---------------------+------------------+
+| student_61 | Выборка всех данных ... | correct   | 2020-08-27 14:22:14 | 0:00:00          |
+| student_61 | Выборка отдельных ст... | correct   | 2020-08-27 14:23:53 | 0:01:39          |
+| student_61 | Выборка отдельных ст... | correct   | 2020-08-27 14:28:41 | 0:04:48          |
+| student_61 | Выборка данных с соз... | wrong     | 2020-08-27 14:33:57 | 0:05:16          |
+| student_61 | Выборка данных с соз... | wrong     | 2020-08-27 14:34:24 | 0:00:27          |
+| student_61 | Выборка данных с соз... | correct   | 2020-08-27 14:34:50 | 0:00:26          |
+| student_61 | Выборка данных, вычи... | correct   | 2020-08-27 14:42:44 | 0:07:54          |
+| student_61 | Выборка данных, вычи... | wrong     | 2020-08-27 14:54:06 | 0:11:22          |
+| student_61 | Выборка данных, вычи... | wrong     | 2020-08-27 14:55:04 | 0:00:58          |
+| student_61 | Выборка данных, вычи... | wrong     | 2020-08-27 14:58:23 | 0:03:19          |
+| student_61 | Выборка данных, вычи... | wrong     | 2020-08-27 14:58:56 | 0:00:33          |
+| student_61 | Выборка данных, вычи... | wrong     | 2020-08-27 14:59:09 | 0:00:13          |
+| student_61 | Выборка данных, вычи... | wrong     | 2020-08-27 14:59:49 | 0:00:40          |
+| student_61 | Выборка данных, вычи... | wrong     | 2020-08-27 15:01:00 | 0:01:11          |
+| student_61 | Выборка данных, вычи... | wrong     | 2020-08-27 15:05:20 | 0:04:20          |
+| student_61 | Выборка данных, вычи... | wrong     | 2020-08-27 15:06:19 | 0:00:59          |
+| student_61 | Выборка данных, вычи... | wrong     | 2020-08-27 15:06:58 | 0:00:39          |
+| student_61 | Выборка данных, вычи... | wrong     | 2020-08-27 15:08:40 | 0:01:42          |
+| student_61 | Выборка данных, вычи... | wrong     | 2020-08-27 15:09:02 | 0:00:22          |
+| student_61 | Выборка данных, вычи... | correct   | 2020-08-27 15:13:06 | 0:04:04          |
+| student_61 | Выборка данных по ус... | wrong     | 2020-08-27 15:21:02 | 0:07:56          |
+| student_61 | Выборка данных по ус... | correct   | 2020-08-27 15:21:18 | 0:00:16          |
+| student_61 | Выборка данных, логи... | correct   | 2020-08-27 15:26:05 | 0:04:47          |
+| student_61 | Выборка данных, опер... | correct   | 2020-08-27 15:31:31 | 0:05:26          |
+| student_61 | Выборка данных, опер... | wrong     | 2020-08-27 15:42:30 | 0:10:59          |
+| student_61 | Выборка данных, опер... | wrong     | 2020-08-27 15:43:35 | 0:01:05          |
+| student_61 | Выборка данных, опер... | wrong     | 2020-08-27 15:48:09 | 0:04:34          |
+| student_61 | Выборка данных, опер... | wrong     | 2020-08-27 15:49:47 | 0:01:38          |
+| student_61 | Выборка данных, опер... | wrong     | 2020-08-27 15:52:13 | 0:02:26          |
+| student_61 | Выборка данных, опер... | wrong     | 2020-08-27 15:57:41 | 0:05:28          |
+| student_61 | Выборка данных, опер... | wrong     | 2020-08-27 15:57:53 | 0:00:12          |
+| student_61 | Выборка данных, опер... | wrong     | 2020-08-27 15:58:28 | 0:00:35          |
+| student_61 | Выборка данных, опер... | wrong     | 2020-08-27 15:59:58 | 0:01:30          |
+| student_61 | Выборка данных, опер... | wrong     | 2020-08-27 16:00:22 | 0:00:24          |
+| student_61 | Выборка данных, опер... | correct   | 2020-08-27 16:01:05 | 0:00:43          |
+| student_61 | Выборка данных с сор... | wrong     | 2020-08-27 16:12:51 | 0:11:46          |
+| student_61 | Выборка данных с сор... | correct   | 2020-08-27 16:14:15 | 0:01:24          |
+| student_61 | Соединение INNER JOI... | correct   | 2020-09-01 07:25:39 | 4 days, 15:11:24 |
+| student_61 | Внешнее соединение L... | wrong     | 2020-09-01 09:53:30 | 2:27:51          |
+| student_61 | Внешнее соединение L... | correct   | 2020-09-01 09:53:50 | 0:00:20          |
+| student_61 | Перекрестное соедине... | wrong     | 2020-09-01 10:45:30 | 0:51:40          |
+| student_61 | Перекрестное соедине... | wrong     | 2020-09-01 10:46:21 | 0:00:51          |
+| student_61 | Перекрестное соедине... | correct   | 2020-09-01 10:47:55 | 0:01:34          |
++------------+-------------------------+-----------+---------------------+------------------+
+
+/*Посчитать среднее время, за которое пользователи проходят урок по следующему алгоритму:
+для каждого пользователя вычислить время прохождения шага как сумму времени, потраченного на каждую попытку (время 
+попытки - это разница между временем отправки задания и временем начала попытки), при этом попытки, которые длились 
+больше 4 часов не учитывать, так как пользователь мог просто оставить задание открытым в браузере, а вернуться к нему 
+на следующий день;
+для каждого студента посчитать общее время, которое он затратил на каждый урок;
+вычислить среднее время выполнения урока в часах, результат округлить до 2-х знаков после запятой;
+вывести информацию по возрастанию времени, пронумеровав строки, для каждого урока указать номер модуля и его позицию в нем.
+Столбцы результата назвать Номер, Урок, Среднее_время.*/
+SELECT ROW_NUMBER() OVER (ORDER BY Среднее_время) AS Номер,
+    Урок,
+    Среднее_время
+FROM(
+    SELECT Урок,
+    ROUND(AVG(difference), 2) AS Среднее_время
+    FROM(
+        SELECT student_id, 
+        CONCAT(module_id, '.', lesson_position, ' ', lesson_name) AS Урок,
+        SUM((submission_time - attempt_time) / 3600) AS difference
+        FROM module
+            INNER JOIN lesson USING (module_id)
+            INNER JOIN step USING (lesson_id)
+            INNER JOIN step_student USING (step_id)
+        WHERE submission_time - attempt_time <= 4 * 3600
+        GROUP BY 1, 2
+     ) AS query_1
+GROUP BY 1
+) AS query_2
+ORDER BY 3;
++-------+-------------------------------------------------------------+---------------+
+| Номер | Урок                                                        | Среднее_время |
++-------+-------------------------------------------------------------+---------------+
+| 1     | 2.2 Запросы на выборку, соединение таблиц                   | 2.37          |
+| 2     | 1.2 Выборка данных                                          | 2.65          |
+| 3     | 2.4 База данных "Интернет-магазин книг", запросы на выборку | 3.65          |
++-------+-------------------------------------------------------------+---------------+
