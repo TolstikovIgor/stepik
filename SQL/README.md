@@ -1,3 +1,4 @@
 # Stepik
 Интерактивный тренажер по SQL
-[Сртификат](https://stepik.org/cert/1559452)
+
+[Сертификат](https://stepik.org/cert/1559452)
