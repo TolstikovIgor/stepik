@@ -1,3 +1,4 @@
 # Stepik 
-Python: 
-[https://stepik.org/course/58852/syllabus](https://stepik.org/course/58852/syllabus)
+"Поколение Python"
+
+[Сертификат](https://stepik.org/cert/1717477)
